@@ -40,3 +40,15 @@ name = "create_missing_system_pnpm"
 vp = "global"
 skip-platforms = ["windows"]
 steps = [["node", "verify.cjs", "pnpm", "missing"]]
+
+[[case]]
+name = "create_system_yarn_classic_external"
+vp = ["local", "global"]
+skip-platforms = ["windows"]
+steps = [{ argv = ["node", "verify.cjs", "yarn", "system", "external"], timeout = 180000 }]
+
+[[case]]
+name = "create_system_yarn_classic"
+vp = ["local", "global"]
+skip-platforms = ["windows"]
+steps = [["node", "verify.cjs", "yarn", "system", "classic"]]
