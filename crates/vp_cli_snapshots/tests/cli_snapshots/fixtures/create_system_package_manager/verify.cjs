@@ -13,7 +13,9 @@ const globalVp = path.join(env.VP_HOME, 'bin', 'vp');
 function run(args, envs = env) {
   const result = spawnSync(args[0] === 'env' ? globalVp : entryVp, args, { env: envs, encoding: 'utf8' });
   if (result.error) throw result.error;
-  assert.equal(result.status, 0, result.stdout + result.stderr);
+  const runnerStarted = template === 'external' && args[0] === 'create'
+    ? `\nPinned npx entered: ${fs.existsSync('npx-args.json')}` : '';
+  assert.equal(result.status, 0, result.stdout + result.stderr + runnerStarted);
   return result.stdout;
 }
 
@@ -47,7 +49,7 @@ if (template === 'external') {
   const nodeBinary = path.join(interpreterDir, 'node');
   fs.symlinkSync(fs.realpathSync(process.execPath), nodeBinary);
   assert.ok(Buffer.byteLength(`#!${nodeBinary}\n`) < 128);
-  fs.writeFileSync(path.join(runnerBin, 'npx'), `#!${nodeBinary}\nrequire(${JSON.stringify(npxCli)});\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(runnerBin, 'npx'), `#!${nodeBinary}\nrequire('node:fs').writeFileSync('npx-args.json', JSON.stringify(process.argv.slice(2)));\nrequire(${JSON.stringify(npxCli)});\n`, { mode: 0o755 });
   env.PATH = [runnerBin, env.PATH].join(path.delimiter);
 }
 if (mode !== 'system') {
@@ -63,6 +65,8 @@ const output = run(['create', ...templateArgs, '--package-manager', manager,
   ...(template === 'external' ? ['--', 'app', '--template', 'vanilla'] : [])]);
 if (template === 'external') {
   assert.match(output, /Running: npx --yes create-vite/);
+  assert.deepEqual(JSON.parse(fs.readFileSync('npx-args.json', 'utf8')),
+    ['--yes', 'create-vite', 'app', '--template', 'vanilla', '--no-immediate', '--no-rolldown']);
   const pkg = JSON.parse(fs.readFileSync('app/package.json', 'utf8'));
   assert.equal(pkg.name, 'app');
   assert.ok(fs.existsSync('app/index.html'));
