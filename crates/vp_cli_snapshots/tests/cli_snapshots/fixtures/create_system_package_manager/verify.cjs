@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
 const [manager, mode, template] = process.argv.slice(2);
@@ -29,9 +30,9 @@ if (mode !== 'missing') {
   env.PATH = [path.join(env.VP_HOME, 'bin'), binDir, env.PATH].join(path.delimiter);
 }
 if (template === 'external') {
-  // Exercise real npx through a case-owned Node launcher. The managed npm
-  // shell shim crosses macOS's arm64e system interpreter before fspy can
-  // substitute its injectable shell, so it is not a portable test launcher.
+  // Use a direct Node shebang: system sh/env interpreters can reject fspy's
+  // arm64 preload on macOS. Keep it short enough for fspy's shebang parser;
+  // case-owned runtime paths can exceed its 128-byte read limit.
   run(['env', 'install', 'npm@10.9.3']);
   const npm = JSON.parse(run(['env', 'current', 'npm', '--json'], {
     ...env, VP_NPM_VERSION: '10.9.3',
@@ -41,7 +42,12 @@ if (template === 'external') {
   assert.ok(fs.existsSync(npxCli));
   const runnerBin = path.resolve('template-bin');
   fs.mkdirSync(runnerBin);
-  fs.writeFileSync(path.join(runnerBin, 'npx'), `#!/usr/bin/env node\nrequire(${JSON.stringify(npxCli)});\n`, { mode: 0o755 });
+  const interpreterDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vp-npx-'));
+  process.on('exit', () => fs.rmSync(interpreterDir, { recursive: true, force: true }));
+  const nodeBinary = path.join(interpreterDir, 'node');
+  fs.symlinkSync(fs.realpathSync(process.execPath), nodeBinary);
+  assert.ok(Buffer.byteLength(`#!${nodeBinary}\n`) < 128);
+  fs.writeFileSync(path.join(runnerBin, 'npx'), `#!${nodeBinary}\nrequire(${JSON.stringify(npxCli)});\n`, { mode: 0o755 });
   env.PATH = [runnerBin, env.PATH].join(path.delimiter);
 }
 if (mode !== 'system') {
