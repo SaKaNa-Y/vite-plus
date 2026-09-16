@@ -28,6 +28,22 @@ if (mode !== 'missing') {
   fs.writeFileSync(path.join(binDir, manager), `#!${process.execPath}\nconst result = require('node:child_process').spawnSync(${JSON.stringify(selection.bin_paths[manager])}, process.argv.slice(2), { stdio: 'inherit' });\nif (result.error) throw result.error;\nprocess.exit(result.status ?? 1);\n`, { mode: 0o755 });
   env.PATH = [path.join(env.VP_HOME, 'bin'), binDir, env.PATH].join(path.delimiter);
 }
+if (template === 'external') {
+  // Exercise real npx through a case-owned Node launcher. The managed npm
+  // shell shim crosses macOS's arm64e system interpreter before fspy can
+  // substitute its injectable shell, so it is not a portable test launcher.
+  run(['env', 'install', 'npm@10.9.3']);
+  const npm = JSON.parse(run(['env', 'current', 'npm', '--json'], {
+    ...env, VP_NPM_VERSION: '10.9.3',
+  })).package_manager;
+  const npmBin = path.dirname(fs.realpathSync(npm.bin_paths.npx));
+  const npxCli = path.join(npmBin, 'npx-cli.js');
+  assert.ok(fs.existsSync(npxCli));
+  const runnerBin = path.resolve('template-bin');
+  fs.mkdirSync(runnerBin);
+  fs.writeFileSync(path.join(runnerBin, 'npx'), `#!/usr/bin/env node\nrequire(${JSON.stringify(npxCli)});\n`, { mode: 0o755 });
+  env.PATH = [runnerBin, env.PATH].join(path.delimiter);
+}
 if (mode !== 'system') {
   fs.writeFileSync('package.json', JSON.stringify({ private: true, packageManager: `${manager}@${managedVersion}` }));
 }
