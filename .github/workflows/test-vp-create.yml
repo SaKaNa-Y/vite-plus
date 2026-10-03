@@ -490,3 +490,29 @@ jobs:
             exit 1
           fi
           echo "✓ 100% cache hit verified"
+
+      - name: Verify library added to existing workspace
+        if: matrix.template.name == 'monorepo'
+        working-directory: ${{ runner.temp }}/test-project
+        run: |
+          workspace_configs=(package.json)
+          for file in pnpm-workspace.yaml .yarnrc.yml; do
+            if [ -f "$file" ]; then
+              workspace_configs+=("$file")
+            fi
+          done
+          for file in "${workspace_configs[@]}"; do
+            cp "$file" "$RUNNER_TEMP/$file.before-library"
+          done
+
+          vp create vite:library --directory packages/additional \
+            --no-interactive --no-hooks --no-agent --no-editor
+
+          for file in "${workspace_configs[@]}"; do
+            cmp "$file" "$RUNNER_TEMP/$file.before-library"
+          done
+          assert_script="$GITHUB_WORKSPACE/crates/vp_cli_snapshots/tests/cli_snapshots/fixtures/create_library_npm/assert-version.mjs"
+          node "$assert_script" . 0.0.0
+          node "$assert_script" packages/additional 0.0.0
+          cd packages/additional
+          vp test run
