@@ -5,12 +5,11 @@ import * as prompts from '@voidzero-dev/vite-plus-prompts';
 import colors from 'picocolors';
 
 import type { WorkspaceInfo } from '../../types/index.ts';
-import { VITE_PLUS_NAME, VITE_PLUS_VERSION } from '../../utils/constants.ts';
-import { editJsonFile } from '../../utils/json.ts';
 import type { ExecutionWithProjectDir } from '../command.ts';
 import { discoverTemplate } from '../discovery.ts';
 import { setPackageName } from '../utils.ts';
 import { executeGeneratorScaffold } from './generator.ts';
+import { prepareLibraryPackage } from './library.ts';
 import { removeNestedLibraryToolConfig } from './monorepo.ts';
 import { runRemoteTemplateCommand } from './remote.ts';
 import { BuiltinTemplate, type BuiltinTemplateInfo, LibraryTemplateRepo } from './types.ts';
@@ -51,17 +50,7 @@ export async function executeBuiltinTemplate(
       return { exitCode: result.exitCode };
     }
     const fullPath = path.join(workspaceInfo.rootDir, templateInfo.targetDir);
-    setPackageName(fullPath, templateInfo.packageName);
-    // The remote template can lag behind the CLI. Align a newly scaffolded
-    // library before project setup injects this CLI's toolchain overrides.
-    editJsonFile<{ devDependencies?: Record<string, string> }>(
-      path.join(fullPath, 'package.json'),
-      (pkg) => {
-        pkg.devDependencies ??= {};
-        pkg.devDependencies[VITE_PLUS_NAME] = VITE_PLUS_VERSION;
-        return pkg;
-      },
-    );
+    prepareLibraryPackage(fullPath, templateInfo.packageName);
     if (workspaceInfo.isMonorepo) {
       removeNestedLibraryToolConfig(fullPath);
     }
