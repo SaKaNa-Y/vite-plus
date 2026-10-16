@@ -11,11 +11,12 @@ use crate::{
     Error, PackageManager, PackageManagerType,
     resolution::{
         AddArgs, ApproveBuildsArgs, AuditArgs, CacheArgs, CiArgs, ConfigCommand, DedupeArgs,
-        DeprecateArgs, DistTagCommand, DlxArgs, FundArgs, InstallArgs, LinkArgs, ListArgs,
-        LoginArgs, LogoutArgs, OutdatedArgs, OutdatedFormat, OwnerCommand, PackArgs, PatchArgs,
-        PatchCommitArgs, PingArgs, PruneArgs, PublishArgs, RebuildArgs, RemoveArgs, Resolution,
-        SearchArgs, StageCommand, TokenCommand, UnlinkArgs, UpdateArgs, VersionArgs, ViewArgs,
-        WhoamiArgs, WhyArgs, resolve_for_manager as resolve_args_for_manager,
+        DeprecateArgs, DistTagCommand, DlxArgs, FundArgs, InstallArgs, LicensesCommand, LinkArgs,
+        ListArgs, LoginArgs, LogoutArgs, OutdatedArgs, OutdatedFormat, OwnerCommand, PackArgs,
+        PatchArgs, PatchCommitArgs, PingArgs, PkgCommand, PruneArgs, PublishArgs, RebuildArgs,
+        RemoveArgs, Resolution, SearchArgs, StageCommand, TokenCommand, UnlinkArgs, UpdateArgs,
+        VersionArgs, ViewArgs, WhoamiArgs, WhyArgs,
+        resolve_for_manager as resolve_args_for_manager,
     },
 };
 
@@ -96,12 +97,20 @@ pub enum PmCommand {
     #[command(visible_alias = "ls")]
     List(ListArgs),
 
+    /// Inspect licenses of installed dependencies
+    #[command(subcommand)]
+    Licenses(LicensesCommand),
+
     /// View package information from the registry
     #[command(visible_alias = "info", visible_alias = "show")]
     View(ViewArgs),
 
     /// Forward the native package version command
     Version(VersionArgs),
+
+    /// Manage package.json fields
+    #[command(subcommand)]
+    Pkg(PkgCommand),
 
     /// Publish package to registry
     Publish(PublishArgs),
@@ -345,8 +354,10 @@ impl PmCommand {
             Self::PatchCommit(args) => resolve_args_for_manager(manager, args),
             Self::Pack(args) => resolve_args_for_manager(manager, args),
             Self::List(args) => resolve_args_for_manager(manager, args),
+            Self::Licenses(args) => resolve_args_for_manager(manager, args),
             Self::View(args) => resolve_args_for_manager(manager, args),
             Self::Version(args) => resolve_args_for_manager(manager, args),
+            Self::Pkg(args) => resolve_args_for_manager(manager, args),
             Self::Publish(args) => resolve_args_for_manager(manager, args),
             Self::Stage(args) => resolve_args_for_manager(manager, args),
             Self::Owner(args) => resolve_args_for_manager(manager, args),
@@ -369,9 +380,11 @@ impl PmCommand {
     fn is_quiet_or_machine_readable(&self) -> bool {
         match self {
             Self::List(args) => args.json || args.parseable,
+            Self::Licenses(LicensesCommand::List { json, .. }) => *json,
             Self::Pack(args) => args.json,
             Self::View(args) => args.json,
             Self::Version(args) => args.json,
+            Self::Pkg(args) => matches!(args, PkgCommand::Get { .. }),
             Self::Publish(args) => args.json,
             Self::Audit(args) => args.json,
             Self::Search(args) => args.json,
@@ -404,7 +417,7 @@ mod tests {
     use clap::{FromArgMatches, Subcommand};
 
     use super::*;
-    use crate::{PackageManagerType, resolution::CommandResolution};
+    use crate::{PackageManagerType, resolution::test_utils::expect_run};
 
     fn parse(args: &[&str]) -> Result<PackageManagerCommand, clap::Error> {
         let command = PackageManagerCommand::augment_subcommands(clap::Command::new("vp"));
@@ -479,6 +492,65 @@ mod tests {
     }
 
     #[test]
+    fn licenses_list_parses_and_resolves_for_supported_managers() {
+        for (client, version, program, prefix) in [
+            (PackageManagerType::Pnpm, "7.17.0", "pnpm", vec!["licenses", "list"]),
+            (PackageManagerType::Yarn, "1.22.22", "yarn", vec!["licenses", "list"]),
+            (PackageManagerType::Bun, "1.4.0", "bun", vec!["pm", "licenses"]),
+        ] {
+            for subcommand in ["list", "ls"] {
+                for json in [false, true] {
+                    let mut argv = vec!["pm", "licenses", subcommand];
+                    let mut expected = prefix.clone();
+                    if json {
+                        argv.push("--json");
+                        expected.push("--json");
+                    }
+                    let command = parse(&argv).unwrap();
+                    assert_eq!(command.is_quiet_or_machine_readable(), json);
+                    assert!(command.should_render_diagnostics());
+                    let result =
+                        command.resolve_for_manager(&package_manager(client, version)).unwrap();
+                    assert!(result.diagnostics.is_empty());
+                    let resolved = expect_run(result.outcome);
+                    assert_eq!(resolved.program, program);
+                    assert_eq!(resolved.args, expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pkg_parses_and_resolves_nested_commands() {
+        for (client, version, program, prefix) in [
+            (PackageManagerType::Npm, "11.0.0", "npm", vec!["pkg"]),
+            (PackageManagerType::Pnpm, "11.3.0", "pnpm", vec!["pkg"]),
+            (PackageManagerType::Bun, "1.2.19", "bun", vec!["pm", "pkg"]),
+        ] {
+            for args in [
+                vec!["get"],
+                vec!["get", "name", "scripts.build"],
+                vec!["set", "scripts.build=vite build", "private=true", "--json"],
+                vec!["delete", "scripts.build", "description"],
+                vec!["fix"],
+            ] {
+                let mut argv = vec!["pm", "pkg"];
+                argv.extend(&args);
+                let parsed = parse(&argv).unwrap();
+                assert_eq!(parsed.is_quiet_or_machine_readable(), args[0] == "get");
+                let resolution =
+                    parsed.resolve_for_manager(&package_manager(client, version)).unwrap();
+                assert!(resolution.diagnostics.is_empty());
+                let command = expect_run(resolution.outcome);
+                assert_eq!(command.program, program);
+                let mut expected = prefix.clone();
+                expected.extend(args);
+                assert_eq!(command.args, expected);
+            }
+        }
+    }
+
+    #[test]
     fn ci_parses_and_captures_pass_through_args() {
         assert!(matches!(
             parse(&["pm", "ci"]).unwrap(),
@@ -495,25 +567,52 @@ mod tests {
 
     #[test]
     fn install_uses_install_or_add_resolver_from_packages() {
-        let manager = package_manager(PackageManagerType::Pnpm, "10.0.0");
-        let install = parse(&["install", "--frozen-lockfile"]).unwrap();
-        let add = parse(&["install", "-D", "react"]).unwrap();
+        for (client, version, install_args, add_args) in [
+            (
+                PackageManagerType::Pnpm,
+                "10.0.0",
+                vec!["install", "--frozen-lockfile"],
+                vec!["add", "--save-dev", "react"],
+            ),
+            (
+                PackageManagerType::Npm,
+                "11.16.0",
+                vec!["ci"],
+                vec!["install", "--save-dev", "react"],
+            ),
+            (
+                PackageManagerType::Bun,
+                "1.4.0",
+                vec!["install", "--frozen-lockfile"],
+                vec!["add", "--dev", "react"],
+            ),
+            (
+                PackageManagerType::Yarn,
+                "1.22.22",
+                vec!["install", "--frozen-lockfile"],
+                vec!["add", "--dev", "react"],
+            ),
+            (
+                PackageManagerType::Yarn,
+                "4.16.0",
+                vec!["install", "--immutable"],
+                vec!["add", "--dev", "react"],
+            ),
+        ] {
+            let manager = package_manager(client, version);
+            let install = parse(&["install", "--frozen-lockfile"]).unwrap();
+            let add = parse(&["install", "-D", "react"]).unwrap();
 
-        let CommandResolution::Run(install) =
-            install.resolve_for_manager(&manager).unwrap().outcome
-        else {
-            panic!("expected install command");
-        };
-        let CommandResolution::Run(add) = add.resolve_for_manager(&manager).unwrap().outcome else {
-            panic!("expected add command");
-        };
+            let install = expect_run(install.resolve_for_manager(&manager).unwrap().outcome);
+            let add = expect_run(add.resolve_for_manager(&manager).unwrap().outcome);
 
-        assert_eq!(install.args, vec!["install", "--frozen-lockfile"]);
-        assert_eq!(add.args, vec!["add", "--save-dev", "react"]);
+            assert_eq!(install.args, install_args);
+            assert_eq!(add.args, add_args);
+        }
     }
 
     #[test]
-    fn yarn_before_3_drops_lockfile_only_when_adding_packages() {
+    fn yarn_before_3_rejects_lockfile_only_when_adding_packages() {
         for version in ["2.4.2", "2.0.0", "1.22.22"] {
             let manager = package_manager(PackageManagerType::Yarn, version);
             for command in ["add", "install", "i"] {
@@ -521,13 +620,9 @@ mod tests {
                     .unwrap()
                     .resolve_for_manager(&manager)
                     .unwrap();
-                let resolved = crate::resolution::test_utils::expect_run(resolution.outcome);
-
-                assert_eq!(resolved.args, ["add", "./dep"], "yarn@{version}: {command}");
-                assert_eq!(resolution.diagnostics.len(), 1);
-                assert_eq!(
-                    resolution.diagnostics[0].message,
-                    "yarn <3 does not support --lockfile-only."
+                crate::resolution::test_utils::expect_unsupported(
+                    resolution,
+                    &["yarn < 3 does not support --lockfile-only."],
                 );
             }
         }

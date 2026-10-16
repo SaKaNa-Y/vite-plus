@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { getScrollOffset } from 'vitepress';
 import { nextTick, onMounted, onUnmounted } from 'vue';
 
 function openTarget() {
@@ -18,9 +17,7 @@ function openTarget() {
   // VitePress cannot measure a heading inside closed details. Correct the scroll after revealing it.
   requestAnimationFrame(() => {
     if (!target.isConnected) return;
-    const top = window.scrollY + target.getBoundingClientRect().top - getScrollOffset()
-      + Number.parseInt(window.getComputedStyle(target).paddingTop, 10);
-    window.scrollTo(0, top);
+    target.scrollIntoView({ block: 'start' });
   });
 }
 
@@ -111,7 +108,7 @@ These variables control the installer scripts and the standalone Windows install
 #### `VP_HOME`
 
 - **Purpose**: Optional pin for the single-root layout. Set it to an absolute path. Vite+ then puts bin, data, cache, config, and state under that directory. The installed CLI reads the same variable. See [Environment](/guide/env).
-- **Default**: unset. Vite+ reuses an existing install in `~/.vite-plus` on Unix or `%USERPROFILE%\.vite-plus` on Windows. The directory must contain a `current` link. Otherwise, a fresh install uses the split platform layout. On Unix, it uses `~/.local/share/vite-plus` and its Vite+-owned `bin` subdirectory. On Windows, it uses `%LOCALAPPDATA%\vite-plus\data` and `%LOCALAPPDATA%\vite-plus\bin`.
+- **Default**: unset. Vite+ reuses an existing install in `~/.vite-plus` on Unix or `%USERPROFILE%\.vite-plus` on Windows. The directory must contain a `current` link. Otherwise, a fresh install uses the split platform layout shown below.
 - **Example**:
 
   ```bash
@@ -123,6 +120,20 @@ These variables control the installer scripts and the standalone Windows install
   # PowerShell
   $env:VP_HOME = "D:\vite-plus"; irm https://vite.plus/ps1 | iex
   ```
+
+Fresh split-layout installations use these defaults:
+
+| Directory | macOS and Linux            | Windows                          |
+| --------- | -------------------------- | -------------------------------- |
+| Data      | `~/.local/share/vite-plus` | `%LOCALAPPDATA%\vite-plus\data`  |
+| Bin       | `<DATA>/bin`               | `%LOCALAPPDATA%\vite-plus\bin`   |
+| Cache     | `~/.cache/vite-plus`       | `%LOCALAPPDATA%\vite-plus\cache` |
+| Config    | `~/.config/vite-plus`      | `%APPDATA%\vite-plus`            |
+| State     | `~/.local/state/vite-plus` | `%LOCALAPPDATA%\vite-plus\state` |
+
+On macOS and Linux, absolute `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, and `XDG_STATE_HOME` values override the corresponding base directories. The bin directory follows the data directory.
+
+Low-priority managed shims live in `<DATA>/fallback-bin`, where `<DATA>` is the resolved data directory.
 
 #### `VP_BIN_DIR` / `VP_DATA_DIR` / `VP_CACHE_DIR`
 
@@ -143,6 +154,17 @@ These variables control the installer scripts and the standalone Windows install
 - **Purpose**: Custom npm registry URL
 - **Default**: `https://registry.npmjs.org`
 - **CLI equivalent**: `--registry`
+- **Managed package managers**: When Vite+ downloads a pinned npm, pnpm,
+  Yarn, or Bun version, it also reads the workspace-root and user `.npmrc`.
+  Package-scoped registries and registry-scoped `_authToken`, `_auth`, or
+  `username`/`_password` credentials are honored. Keep secrets in environment
+  variables and reference them from `.npmrc`, for example:
+
+  ```ini
+  registry=https://npm.corp.example/repository/npm/
+  //npm.corp.example/repository/npm/:_authToken=${NPM_TOKEN}
+  ```
+
 - **Example**:
   ```bash
   curl -fsSL https://vite.plus | NPM_CONFIG_REGISTRY=https://registry.npmmirror.com bash
@@ -189,7 +211,7 @@ These management variables are installation choices, saved in Vite+'s config. Th
 
 #### Development variables
 
-Use `VP_LOCAL_TGZ` and `VP_LOCAL_BINARY` when you develop Vite+ itself. `VP_LOCAL_TGZ` specifies a local `vite-plus.tgz` file. `VP_LOCAL_BINARY` specifies a local `vp` binary. The installers use these files for the local build. They use `VP_DUMP_DIRS=1` to get the layout mode and all five `EnvConfig` category roots from the selected binary. They do not resolve the directory variables. The installers set `VP_INSTALL_STOP`; do not set it manually.
+Use `VP_LOCAL_TGZ` and `VP_LOCAL_BINARY` when you develop Vite+ itself. `VP_LOCAL_TGZ` specifies a local `vite-plus.tgz` file. `VP_LOCAL_BINARY` specifies a local `vp` binary. The installers use these files for the local build.
 
 ### Runtime Variables
 
@@ -251,10 +273,11 @@ These variables configure the installed Vite+ CLI. `VP_HOME` (above) also applie
 #### `VP_BYPASS`
 
 - **Purpose**: Bypass the Vite+ shim and use the system tool
-- **Values**: `PATH`-style list of directories to bypass
-- **Default**: None
+- **Values**: Setting this variable, including to an empty string, enables bypass mode. Its value is a `PATH`-style list of additional directories to exclude from the search. The Vite+ bin directory and Vite+ shims are skipped automatically.
+- **Default**: Unset
 - **Example**:
   ```bash
+  # Find a system Node.js on PATH, excluding /usr/local/bin.
   VP_BYPASS=/usr/local/bin node -v
   ```
 
@@ -289,7 +312,6 @@ Vite+ sets additional `VP_*` variables during shim dispatch and shell integratio
 #### `VP_LOG`
 
 - **Purpose**: Log filter string for `tracing_subscriber`
-- **Installer behavior**: When `CI=true`, `install.sh` hides shell file errors. Set `VP_LOG=trace` to show these errors.
 - **Default**: None
 - **Example**:
   ```bash
@@ -381,6 +403,10 @@ vp dlx create-vite   # Download and run a package binary
 
 You do not need a local `vite-plus` dependency to run existing `package.json` scripts. Add the [project-local CLI](/guide/local-cli) when you want the frontend toolchain version recorded in the project's manifest and lockfile.
 
+## Run a Command in Another Directory
+
+Use `vp -C <dir> <command>` to run any `vp` command from another working directory. See [Targeting a package with `-C`](/guide/monorepo#targeting-a-package-with-c) for examples and details.
+
 ## Use Both CLIs Together
 
 The global CLI and the project-local `vite-plus` package work together. You keep using the same `vp` command, while each project can choose its own toolchain version.
@@ -403,7 +429,7 @@ To see which toolchain is selected for your current project, run `vp toolchain`.
 ## Next Steps
 
 - [Environment](/guide/env) covers Node.js and package-manager selection, pinning, shims, and managed installations.
-- [Package Management](/guide/install) covers pnpm, npm, Yarn, and Bun workflows.
+- [Package Management](/guide/package-management) covers pnpm, npm, Yarn, and Bun workflows.
 - [Run](/guide/run) covers package scripts and cached workspace tasks.
 - [Upgrading Vite+](/guide/upgrade) explains global CLI upgrades. See [Update Vite+](/guide/upgrade-project) for project-local upgrades.
 - [Removing Vite+](/guide/implode) removes the global binary and its managed data.
