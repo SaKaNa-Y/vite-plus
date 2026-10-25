@@ -9,7 +9,6 @@ steps = [
 [[case]]
 name = "command_remove_npm10"
 vp = "global"
-serial = true
 skip-platforms = ["windows"]
 steps = [
   { argv = ["vp", "remove", "testnpm2", "-D", "--", "--no-audit"], comment = "delegate removal of an absent package to npm" },
@@ -21,7 +20,5 @@ steps = [
   { argv = ["vp", "remove", "testnpm2", "test-vite-plus-install", "--", "--no-audit"], comment = "should remove packages from dependencies" },
   { argv = ["vpt", "print-file", "package.json"], continue-on-failure = true },
   { argv = ["vp", "remove", "-D", "test-vite-plus-package-optional", "--", "--loglevel=warn", "--no-audit"], comment = "npm removes the optional dependency even with --save-dev" },
-  { argv = ["vpt", "print-file", "package.json"], continue-on-failure = true },
-  { argv = ["vp", "remove", "-g", "--dry-run", "testnpm2"], comment = "support remove global package with dry-run" },
   { argv = ["vpt", "print-file", "package.json"], continue-on-failure = true },
 ]

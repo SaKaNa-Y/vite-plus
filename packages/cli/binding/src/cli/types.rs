@@ -89,6 +89,9 @@ pub enum SynthesizableSubcommand {
         /// Disable reporting on warnings, only errors are reported
         #[arg(long)]
         quiet: bool,
+        /// Treat lint warnings as errors
+        #[arg(long = "deny-warnings")]
+        deny_warnings: bool,
         /// Skip format check
         #[arg(long = "no-fmt")]
         no_fmt: bool,
@@ -115,7 +118,7 @@ pub struct ToolchainArgs {
     pub json: bool,
 
     /// Use the global Vite+ toolchain
-    #[arg(long)]
+    #[arg(short = 'g', long)]
     pub global: bool,
 }
 
